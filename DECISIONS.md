@@ -1,0 +1,1 @@
+Require pull request before merging + Require approvals
