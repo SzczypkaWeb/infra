@@ -1,1 +1,1 @@
-# infra
+Compose zakłada repo sklonowane jako sibling-foldery (backend, frontend-shell, infra obok siebie) — to uproszczenie tylko na czas lokalnego dev, docelowo (Faza 9–10) backend/frontend-shell będą referencjonowane jako gotowe obrazy z registry, nie budowane z lokalnego kodu.
