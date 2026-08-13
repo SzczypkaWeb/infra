@@ -3,8 +3,11 @@
 # under Terraform management, WITHOUT destroying/recreating anything.
 # Run from inside modules/gcp/, after `terraform init`.
 #
-# Safe to re-run - `terraform import` on an already-imported resource just
-# errors "Resource already managed", it doesn't touch real infra either way.
+# Genuinely safe to re-run - each import is guarded by `terraform state show`
+# first, so an already-imported resource is skipped instead of hitting
+# "Resource already managed by Terraform" (which, with `set -e`, would kill
+# the whole script partway through on a second run - that's what plain
+# `terraform import` on every line used to do here).
 #
 # After this finishes, run `terraform plan` - it should show (close to) zero
 # changes. Any diff it does show is real drift between what's actually
@@ -17,42 +20,75 @@ PROJECT="szczypka-web-backend"
 REGION="europe-central2"
 SA_EMAIL="github-actions-backend-deploy@${PROJECT}.iam.gserviceaccount.com"
 
-terraform import google_artifact_registry_repository.backend \
+# IAM bindings for a WIF principalSet member are always stored by Google
+# using the PROJECT NUMBER, never the project ID, regardless of which form
+# you used when granting the binding - confirmed against Google's own docs.
+# Using the project ID here (like everywhere else in this script) makes
+# `terraform import` fail with "Cannot find binding for..." even though the
+# binding genuinely exists - it's just indexed under a different string.
+PROJECT_NUMBER="416578348143"
+
+import_if_needed() {
+  local addr="$1"
+  local id="$2"
+  if terraform state show "$addr" >/dev/null 2>&1; then
+    echo "skip (already in state): $addr"
+  else
+    terraform import "$addr" "$id"
+  fi
+}
+
+import_if_needed google_artifact_registry_repository.backend \
   "projects/${PROJECT}/locations/${REGION}/repositories/backend"
 
 for secret in DATABASE_URL GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET GOOGLE_CALLBACK_URL \
               FRONTEND_ORIGIN JWT_ACCESS_SECRET JWT_REFRESH_SECRET SENTRY_DSN; do
-  terraform import "google_secret_manager_secret.backend[\"${secret}\"]" \
+  import_if_needed "google_secret_manager_secret.backend[\"${secret}\"]" \
     "projects/${PROJECT}/secrets/${secret}"
-  terraform import "google_secret_manager_secret_iam_member.deploy_secret_accessor[\"${secret}\"]" \
+  import_if_needed "google_secret_manager_secret_iam_member.deploy_secret_accessor[\"${secret}\"]" \
     "projects/${PROJECT}/secrets/${secret} roles/secretmanager.secretAccessor serviceAccount:${SA_EMAIL}"
 done
 
-terraform import google_cloud_run_v2_service.backend \
+import_if_needed google_cloud_run_v2_service.backend \
   "projects/${PROJECT}/locations/${REGION}/services/backend"
 
-terraform import google_cloud_run_v2_service_iam_member.backend_public \
+import_if_needed google_cloud_run_v2_service_iam_member.backend_public \
   "projects/${PROJECT}/locations/${REGION}/services/backend roles/run.invoker allUsers"
 
-terraform import google_iam_workload_identity_pool.github \
+import_if_needed google_iam_workload_identity_pool.github \
   "projects/${PROJECT}/locations/global/workloadIdentityPools/github-pool"
 
-terraform import google_iam_workload_identity_pool_provider.github \
+import_if_needed google_iam_workload_identity_pool_provider.github \
   "projects/${PROJECT}/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
 
-terraform import google_service_account.github_actions_backend_deploy \
+import_if_needed google_service_account.github_actions_backend_deploy \
   "projects/${PROJECT}/serviceAccounts/${SA_EMAIL}"
 
-terraform import google_service_account_iam_member.wif_binding \
-  "projects/${PROJECT}/serviceAccounts/${SA_EMAIL} roles/iam.workloadIdentityUser principalSet://iam.googleapis.com/projects/${PROJECT}/locations/global/workloadIdentityPools/github-pool/attribute.repository/SzczypkaWeb/backend"
+import_if_needed google_service_account_iam_member.wif_binding \
+  "projects/${PROJECT}/serviceAccounts/${SA_EMAIL} roles/iam.workloadIdentityUser principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-pool/attribute.repository/SzczypkaWeb/backend"
 
-terraform import google_project_iam_member.deploy_run_admin \
+import_if_needed google_project_iam_member.deploy_run_admin \
   "${PROJECT} roles/run.admin serviceAccount:${SA_EMAIL}"
 
-terraform import google_project_iam_member.deploy_artifact_registry_writer \
+import_if_needed google_project_iam_member.deploy_artifact_registry_writer \
   "${PROJECT} roles/artifactregistry.writer serviceAccount:${SA_EMAIL}"
 
-terraform import google_project_iam_member.deploy_service_account_user \
+import_if_needed google_project_iam_member.deploy_service_account_user \
   "${PROJECT} roles/iam.serviceAccountUser serviceAccount:${SA_EMAIL}"
+
+# Read-only SA for the infra repo's own Terraform CI (terraform-ci.yml) -
+# created manually via gcloud (see RUNBOOK.md), same chicken-and-egg reason
+# as everything else in this script: Terraform can't create the identity
+# that Terraform CI itself needs to run.
+INFRA_PLAN_SA_EMAIL="github-actions-infra-plan@${PROJECT}.iam.gserviceaccount.com"
+
+import_if_needed google_service_account.github_actions_infra_plan \
+  "projects/${PROJECT}/serviceAccounts/${INFRA_PLAN_SA_EMAIL}"
+
+import_if_needed google_service_account_iam_member.infra_plan_wif_binding \
+  "projects/${PROJECT}/serviceAccounts/${INFRA_PLAN_SA_EMAIL} roles/iam.workloadIdentityUser principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-pool/attribute.repository/SzczypkaWeb/infra"
+
+import_if_needed google_project_iam_member.infra_plan_viewer \
+  "${PROJECT} roles/viewer serviceAccount:${INFRA_PLAN_SA_EMAIL}"
 
 echo "Done. Now run: terraform plan   (expect ~zero diff; reconcile anything else before apply)"
