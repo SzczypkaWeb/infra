@@ -1,1 +1,1 @@
-Compose zakłada repo sklonowane jako sibling-foldery (backend, frontend-shell, infra obok siebie) — to uproszczenie tylko na czas lokalnego dev, docelowo (Faza 9–10) backend/frontend-shell będą referencjonowane jako gotowe obrazy z registry, nie budowane z lokalnego kodu.
+Compose assumes the repos are cloned as sibling folders (backend, frontend-shell, infra next to each other) — this is a simplification for local dev only; eventually (Phase 9–10) backend/frontend-shell will be referenced as pre-built images from a registry, not built from local code.
