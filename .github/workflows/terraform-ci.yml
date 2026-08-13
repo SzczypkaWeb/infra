@@ -1,0 +1,96 @@
+name: Terraform CI
+
+# Plan-only, read-only - never applies anything. Runs once per module that
+# actually changed in a given PR, using the read-only OIDC identities set up
+# manually (see RUNBOOK.md: github-actions-infra-plan for GCP,
+# github-actions-infra-plan app registration for Azure) - both granted only
+# Viewer/Reader-class roles, nothing that can write infrastructure or state.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'modules/gcp/**'
+      - 'modules/azure/**'
+      - '.github/workflows/terraform-ci.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  plan:
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [gcp, azure]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: modules/${{ matrix.module }}
+    # Azure auth vars are harmless no-ops for the gcp module run (the google
+    # provider ignores ARM_* entirely) - simpler than conditioning every step
+    # on matrix.module.
+    env:
+      ARM_USE_OIDC: true
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # google-github-actions/auth writes an Application Default Credentials
+      # file and points GOOGLE_APPLICATION_CREDENTIALS at it - the google
+      # provider in provider.tf (no explicit `credentials` argument) picks
+      # this up automatically, no extra wiring needed.
+      - name: Authenticate to GCP
+        if: matrix.module == 'gcp'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/416578348143/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+          service_account: 'github-actions-infra-plan@szczypka-web-backend.iam.gserviceaccount.com'
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: true
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform validate
+        run: terraform validate
+
+      # -lock=false on purpose: the read-only CI identities (roles/viewer on
+      # GCP, Reader/Storage Blob Data Reader on Azure) can't acquire a state
+      # lock, which needs write access to the state backend. A plan-only job
+      # reading a possibly-in-progress-elsewhere state isn't worth granting
+      # write access just to avoid - this is read-only tooling, not a place
+      # that should ever be able to touch real infrastructure or state.
+      - name: Terraform plan
+        id: plan
+        run: terraform plan -no-color -lock=false
+        continue-on-error: true
+
+      - name: Comment plan on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `#### Terraform Plan - \`${{ matrix.module }}\` (${{ steps.plan.outcome }})
+            <details><summary>Show plan</summary>
+
+            \`\`\`
+            ${{ steps.plan.outputs.stdout }}
+            ${{ steps.plan.outputs.stderr }}
+            \`\`\`
+
+            </details>`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output,
+            });
+
+      - name: Fail job if plan failed
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
