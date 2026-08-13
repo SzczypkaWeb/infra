@@ -343,26 +343,41 @@ migration, not the first step.
   real cross-origin cookie session). See `infra/BLOG_NOTES.md` for the full
   postmortem of what broke on the first real run.
 - `roles/secretmanager.secretAccessor` for `github-actions-backend-deploy@`
-  on `DATABASE_URL`/`DATABASE_URL_STAGING` — not verified whether already
-  granted, needed now by the "Fetch DATABASE_URL for migrations" step
-  (section 6)
-- Branch protection on `main` — not verified whether actually configured per
-  repo (deliberately deferred, next in line after this)
+  on `DATABASE_URL`/`DATABASE_URL_STAGING` — granted (project-level, covers
+  both the WIF deploy SA and the default Compute Engine runtime SA - see the
+  postmortem in `infra/BLOG_NOTES.md` for why both identities needed it).
+- **Branch protection on `main` — done, all 8 repos.** All repos were made
+  public (portfolio project - see `DECISIONS.md`), which also unlocks
+  repository Rulesets on GitHub Free (classic branch protection AND
+  rulesets are both Free-plan-private-repo-only otherwise). Used Rulesets
+  (GitHub's recommended replacement for classic branch protection - holds
+  admins to the rule too, no bypass unless explicitly listed) with: require
+  PR before merge (0 approvals - solo project), block force pushes, and a
+  required status check per repo: `test` (backend), `ci` (shared-ui,
+  e2e-tests), `Build and Deploy Job` (frontend-shell, react-app), `Vercel`
+  (next-app). `orchestrator` and `infra` have the same PR/force-push rules
+  but no required check yet (see below).
 - GitHub Environments (`staging`/`production`/`preview`) — exist only as
   references in workflows, without manually set required reviewers they
   currently block nothing
-- `DATABASE_URL_STAGING` + the rest of the `_STAGING` secrets (GCP Secret
-  Manager) — not created; a separate Supabase project for staging — not
-  created
-- `promote-to-main` in `deploy-gcp-staging.yml` — placeholder, not a real
-  auto-PR/auto-merge
+- `promote-to-main` in `deploy-gcp-staging.yml` — still a placeholder, not a
+  real auto-PR/auto-merge. The actual staging→main promotions done so far
+  (backend, react-app, frontend-shell, infra) were manual PRs.
+- `orchestrator` has no automated tests or CI at all (no `pull_request`
+  check configured) - found while wiring branch-protection status checks
+  for the other 7 repos. Lower priority than the marketplace backend
+  modules, but a real gap for a repo with this much control-flow logic
+  (`nodes.py`, `graph.py`).
 - `ai-service` and `infra` (Terraform) — outside `orchestrator/repos.py`, not
   covered by any of the pipelines above; Terraform itself has no CI
   (`terraform plan` on PR, OIDC instead of local credentials) — deliberately
-  deferred, next in line after branch protection
+  deferred, next in line now that branch protection is done
 - Monitoring/alerting beyond Sentry (application errors) — nothing for
   uptime/availability of the Azure SWA / Cloud Run resources themselves
-  (Application Insights, uptime check) — deliberately deferred, third in line
-- The `app` project in e2e — code ready and wired up conditionally in three
-  places (backend, react-app, frontend-shell), but not actually running
-  anywhere until the table in section 6 is filled in
+  (Application Insights, uptime check) — deliberately deferred, after
+  Terraform CI
+- Folding the manually-applied GCP IAM grants (compute SA + WIF SA secret
+  access, project-level) into `modules/gcp/iam.tf` via `terraform import` —
+  deliberately deferred, after monitoring
+- The `app` project in e2e — wired up and confirmed running for real
+  (see the "#45 done" note above), no longer just "code ready."
