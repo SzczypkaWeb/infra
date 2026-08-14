@@ -23,4 +23,17 @@ terraform {
 provider "google" {
   project = "szczypka-web-backend"
   region  = "europe-central2"
+
+  # Without this, some APIs (billingbudgets.googleapis.com being the one
+  # that surfaced it) get quota-checked against whatever project ADC
+  # defaults to locally - not the `project` above - which for local `gcloud`
+  # sessions on this machine turned out to be the old default "My First
+  # Project" (came up before, when GCP Console kept defaulting there too).
+  # `gcloud auth application-default set-quota-project` does NOT fix this -
+  # the Terraform provider has its own separate resolution path, ignoring
+  # ADC's own quota_project_id field. This is the documented, correct fix:
+  # explicitly pin the billing/quota project and force every API call to
+  # use it.
+  billing_project       = "szczypka-web-backend"
+  user_project_override = true
 }

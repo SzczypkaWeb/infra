@@ -114,3 +114,60 @@ resource "azurerm_role_assignment" "infra_plan_swa_reader_react_app" {
   role_definition_id = azurerm_role_definition.static_web_app_plan_reader.role_definition_resource_id
   principal_id       = azuread_service_principal.infra_plan.object_id
 }
+
+# azurerm_consumption_budget_subscription (budget.tf) is scoped at the
+# subscription root, not any resource group - none of the RG/resource-scoped
+# assignments above cover it, so terraform-ci's plan job got a 401 trying to
+# read it (Microsoft.Consumption/budgets isn't included in the narrower
+# scopes above). `Cost Management Reader` is the built-in role for exactly
+# this - read access to cost/budget data, nothing else - deliberately not
+# plain `Reader` at subscription scope, which would hand this read-only CI
+# identity visibility into every resource in the subscription instead of
+# just the one new resource type it actually needs.
+resource "azurerm_role_assignment" "infra_plan_cost_management_reader" {
+  scope                = "/subscriptions/${local.subscription_id}"
+  role_definition_name = "Cost Management Reader"
+  principal_id         = azuread_service_principal.infra_plan.object_id
+}
+
+# Self-referential gap surfaced by the assignment above: the moment ANY role
+# assignment is scoped at the subscription root (rather than a resource/RG
+# this identity already has a role on), terraform-ci's plan job can no longer
+# read that assignment object back on a later run -
+# `Microsoft.Authorization/roleAssignments/read` isn't included in `Cost
+# Management Reader` (that role only covers Microsoft.CostManagement/
+# Microsoft.Consumption actions), and this identity has no OTHER role at the
+# subscription root to fall back on. Every other role_assignment resource in
+# this file avoided this because it's scoped at the same RG/resource where
+# this identity already holds Reader (or the custom SWA role), which grants
+# roleAssignments/read at that scope for free - reading role DEFINITIONS
+# (see static_web_app_plan_reader above) needs no permission at all in Azure,
+# it's globally readable; role ASSIGNMENTS are not.
+#
+# Fix: a second custom role, narrowly scoped to exactly
+# Microsoft.Authorization/roleAssignments/read - deliberately not built-in
+# `Reader` at subscription scope, which would hand this read-only CI identity
+# visibility into every resource in the subscription just to solve a read-back
+# problem on two specific objects. Self-covering once applied: this
+# assignment is itself scoped at the subscription root, so once it exists it
+# grants the read access needed to read itself back on the next plan - same
+# shape as the RG-scoped assignments above.
+resource "azurerm_role_definition" "role_assignment_reader" {
+  name        = "Role Assignment Reader"
+  scope       = "/subscriptions/${local.subscription_id}"
+  description = "Read-only access to Microsoft.Authorization/roleAssignments at subscription scope, for Terraform plan-only CI to read back subscription-scoped role assignments it manages."
+
+  permissions {
+    actions = [
+      "Microsoft.Authorization/roleAssignments/read",
+    ]
+  }
+
+  assignable_scopes = ["/subscriptions/${local.subscription_id}"]
+}
+
+resource "azurerm_role_assignment" "infra_plan_role_assignment_reader" {
+  scope              = "/subscriptions/${local.subscription_id}"
+  role_definition_id = azurerm_role_definition.role_assignment_reader.role_definition_resource_id
+  principal_id       = azuread_service_principal.infra_plan.object_id
+}
