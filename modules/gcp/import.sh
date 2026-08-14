@@ -91,4 +91,19 @@ import_if_needed google_service_account_iam_member.infra_plan_wif_binding \
 import_if_needed google_project_iam_member.infra_plan_viewer \
   "${PROJECT} roles/viewer serviceAccount:${INFRA_PLAN_SA_EMAIL}"
 
+# Slack notification channel (monitoring.tf) - must be created via the Cloud
+# Console's own Slack OAuth flow first (see RUNBOOK.md), NOT by
+# `terraform apply` from scratch - a Terraform-created Slack channel silently
+# never delivers real messages (see the comment in monitoring.tf). Fill in
+# the real ID below once it exists - find it with:
+#   gcloud alpha monitoring channels list --project="${PROJECT}"
+SLACK_CHANNEL_ID="16084917688367049121"
+
+if [ -z "$SLACK_CHANNEL_ID" ]; then
+  echo "skip: google_monitoring_notification_channel.slack_alerts (set SLACK_CHANNEL_ID in import.sh first - see RUNBOOK.md)"
+else
+  import_if_needed google_monitoring_notification_channel.slack_alerts \
+    "projects/${PROJECT}/notificationChannels/${SLACK_CHANNEL_ID}"
+fi
+
 echo "Done. Now run: terraform plan   (expect ~zero diff; reconcile anything else before apply)"
