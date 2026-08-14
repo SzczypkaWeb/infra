@@ -399,16 +399,21 @@ migration, not the first step.
   worth the extra infra for this. See `infra/BLOG_NOTES.md` for a script
   bug hit along the way (a placeholder string reused in two places in
   `import.sh`, defeated by a blanket find-and-replace).
-- Azure's OIDC setup for `terraform-ci.yml` (App Registration, federated
-  credential, the `Static Web App Plan Reader` custom RBAC role, all the
-  role assignments) is **manual `az` CLI only, not modeled in Terraform** -
-  unlike GCP's equivalent (`github_iam_workload_identity_pool`,
-  `github_actions_infra_plan` SA, etc., all real resources in
-  `modules/gcp/iam.tf`). Asymmetry worth closing at some point: either add an
-  `azuread` provider block modeling the App Registration + federated
-  credential, or accept it as permanently-manual bootstrap (same category as
-  the state storage account itself) and just document it clearly - not
-  decided yet.
+- **Azure's OIDC setup for `terraform-ci.yml` is now modeled in Terraform —
+  done.** `modules/azure/oidc.tf`: `azuread_application` +
+  `azuread_service_principal` + `azuread_application_federated_identity_credential`
+  for `github-actions-infra-plan`, plus `azurerm_role_definition` for the
+  `Static Web App Plan Reader` custom role and all 6 `azurerm_role_assignment`
+  resources (2× `Reader` at resource-group scope, `Reader` +
+  `Storage Blob Data Reader` on the tfstate storage account, and the custom
+  role on each Static Web App individually). Real object/credential IDs
+  found via `az ad app list` / `az ad app federated-credential list` /
+  `az ad sp show` / `az role definition list` / `az role assignment list`,
+  then bootstrapped-then-imported the same way as everything else in this
+  module (see `import.sh`) — closes the asymmetry with GCP's equivalent in
+  `modules/gcp/iam.tf`. `terraform plan` came back clean (0 to add) on the
+  first real import, confirming the Terraform matches exactly what was
+  actually deployed by hand.
 - The manually-applied GCP IAM grants ARE now folded into
   `modules/gcp/iam.tf` and genuinely imported into real Terraform state
   (this was the bulk of today's work) - the equivalent item from the
