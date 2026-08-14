@@ -355,8 +355,18 @@ migration, not the first step.
   PR before merge (0 approvals - solo project), block force pushes, and a
   required status check per repo: `test` (backend), `ci` (shared-ui,
   e2e-tests), `Build and Deploy Job` (frontend-shell, react-app), `Vercel`
-  (next-app). `orchestrator` and `infra` have the same PR/force-push rules
-  but no required check yet (see below).
+  (next-app), `plan (gcp)` + `plan (azure)` (infra). `orchestrator` has the
+  same PR/force-push rules but no required check yet (no CI - see below).
+- **Terraform CI (`terraform plan` on PR, GCP + Azure) — done.** Read-only
+  OIDC identities (`github-actions-infra-plan` on GCP, a dedicated App
+  Registration + custom RBAC role on Azure), `.github/workflows/
+  terraform-ci.yml`, both required as branch-protection checks above. Getting
+  here also meant doing the *actual* `terraform init` + `import.sh` +
+  `plan`/`apply` for the gcp and azure modules for the first time ever -
+  turns out the earlier "#53 done" note was aspirational, not real (see the
+  Terraform postmortem in `infra/BLOG_NOTES.md` - it's long, this was by far
+  the most bug-dense stretch of the whole project). AWS stays untouched
+  (destroyed/dormant reference module, deliberately out of scope).
 - GitHub Environments (`staging`/`production`/`preview`) — exist only as
   references in workflows, without manually set required reviewers they
   currently block nothing
@@ -368,16 +378,40 @@ migration, not the first step.
   for the other 7 repos. Lower priority than the marketplace backend
   modules, but a real gap for a repo with this much control-flow logic
   (`nodes.py`, `graph.py`).
-- `ai-service` and `infra` (Terraform) — outside `orchestrator/repos.py`, not
-  covered by any of the pipelines above; Terraform itself has no CI
-  (`terraform plan` on PR, OIDC instead of local credentials) — deliberately
-  deferred, next in line now that branch protection is done
-- Monitoring/alerting beyond Sentry (application errors) — nothing for
-  uptime/availability of the Azure SWA / Cloud Run resources themselves
-  (Application Insights, uptime check) — deliberately deferred, after
-  Terraform CI
-- Folding the manually-applied GCP IAM grants (compute SA + WIF SA secret
-  access, project-level) into `modules/gcp/iam.tf` via `terraform import` —
-  deliberately deferred, after monitoring
+- `ai-service` — outside `orchestrator/repos.py`, not covered by any pipeline
+  above; still has no repo/CI of its own at all - lowest priority, no
+  concrete plan yet.
+- **Monitoring/alerting beyond Sentry — done.** GCP: a
+  `google_monitoring_uptime_check_config` hitting the backend's `/health`
+  over HTTPS every 5 minutes, tied to a `google_monitoring_alert_policy`
+  that notifies a Slack channel (`modules/gcp/monitoring.tf`). The Slack
+  notification channel itself is deliberately NOT created by Terraform from
+  scratch — `google_monitoring_notification_channel` with a bot
+  `auth_token` is a known-broken path upstream (channels created that way
+  never actually deliver messages) — it's linked once via the Console's own
+  Slack OAuth flow, then imported, same bootstrap-then-import pattern as
+  the GCS state bucket. Azure: `azurerm_application_insights_standard_web_test`
+  (Standard, not the URL-ping kind being retired 2026-09-30) for both
+  Static Web Apps, alerting via a plain email action group
+  (`modules/azure/monitoring.tf`) — Azure Monitor has no native Slack
+  action, and a raw webhook would need its own relay to reformat the
+  payload into what Slack's incoming webhook expects, which wasn't judged
+  worth the extra infra for this. See `infra/BLOG_NOTES.md` for a script
+  bug hit along the way (a placeholder string reused in two places in
+  `import.sh`, defeated by a blanket find-and-replace).
+- Azure's OIDC setup for `terraform-ci.yml` (App Registration, federated
+  credential, the `Static Web App Plan Reader` custom RBAC role, all the
+  role assignments) is **manual `az` CLI only, not modeled in Terraform** -
+  unlike GCP's equivalent (`github_iam_workload_identity_pool`,
+  `github_actions_infra_plan` SA, etc., all real resources in
+  `modules/gcp/iam.tf`). Asymmetry worth closing at some point: either add an
+  `azuread` provider block modeling the App Registration + federated
+  credential, or accept it as permanently-manual bootstrap (same category as
+  the state storage account itself) and just document it clearly - not
+  decided yet.
+- The manually-applied GCP IAM grants ARE now folded into
+  `modules/gcp/iam.tf` and genuinely imported into real Terraform state
+  (this was the bulk of today's work) - the equivalent item from the
+  previous version of this list is done, not just planned.
 - The `app` project in e2e — wired up and confirmed running for real
   (see the "#45 done" note above), no longer just "code ready."
