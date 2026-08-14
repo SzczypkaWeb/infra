@@ -420,3 +420,35 @@ migration, not the first step.
   previous version of this list is done, not just planned.
 - The `app` project in e2e — wired up and confirmed running for real
   (see the "#45 done" note above), no longer just "code ready."
+- **Testing/Sentry coverage audited, clear gaps closed.** A repo-by-repo
+  survey (see `BLOG_NOTES.md`) found real unit test coverage already existed
+  in backend/frontend-shell/shared-ui, and Sentry was genuinely wired for
+  backend/next-app - but two unambiguous gaps: next-app had zero CI at all
+  (Vercel built every PR with no lint/test gate first), and react-app had no
+  Sentry whatsoever. Both closed: next-app now has `.github/workflows/ci.yml`
+  (lint/test/build, required check `ci` added to its ruleset alongside
+  `Vercel`), and react-app has its own Sentry project, initialized in
+  `bootstrap.tsx` only (deliberately not in `Widget.tsx`, the actual Module
+  Federation export - see the comment there for why). Separately found and
+  fixed a real bug while wiring react-app's Sentry: frontend-shell's own
+  Sentry had silently never sent a single event in production, because
+  `SENTRY_DSN` was never passed into the Azure Actions build step - the
+  webpack `DefinePlugin` fallback (`?? ''`) meant every build shipped
+  `Sentry.init({ dsn: '' })`. Fixed for both apps, plus both now tag events
+  with `production`/`staging`/`preview` via `SENTRY_ENVIRONMENT` (one Sentry
+  project per app, not one per environment). Also fixed:
+  frontend-shell's `ErrorBoundary.componentDidCatch` only ever did
+  `console.error` - React error boundaries catch render-phase errors, which
+  never reach `window.onerror`, so this was a second silent gap (the
+  boundary specifically wraps the react-app remote widget) - now calls
+  `Sentry.captureException`. Remaining, deliberately left as-is for now:
+  react-app/next-app's unit test coverage is thin (smoke-test level, not
+  broken), E2E coverage is only 3 scenarios, and e2e-tests' own PR check is
+  `--list`-only (syntax check, not a real run) - none of these are bugs,
+  just shallower than they could be, lower priority than the two real gaps
+  above. Also noted: next-app has no `staging` environment/branch, unlike
+  backend/react-app/frontend-shell - deliberately skipped for now since
+  next-app has no backend/API dependency yet (the search field is a static
+  placeholder); worth revisiting once the marketplace search endpoint
+  (still pending - see the Marketplace module backlog) actually gets wired
+  into next-app.

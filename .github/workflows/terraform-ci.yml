@@ -5,13 +5,23 @@ name: Terraform CI
 # manually (see RUNBOOK.md: github-actions-infra-plan for GCP,
 # github-actions-infra-plan app registration for Azure) - both granted only
 # Viewer/Reader-class roles, nothing that can write infrastructure or state.
+#
+# Deliberately NOT path-filtered at the trigger level (`on.pull_request.paths`)
+# even though only modules/gcp|azure/** changes actually need a real plan -
+# `plan (gcp)`/`plan (azure)` are REQUIRED status checks in this repo's
+# ruleset, and a path-filtered trigger means the workflow (and therefore the
+# check) never runs at all for a PR that doesn't touch those paths - e.g. a
+# pure RUNBOOK.md change. GitHub then shows "Expected - Waiting for status to
+# be reported" forever, permanently blocking merge, since there's no check
+# run to satisfy the requirement. Found the hard way on a docs-only PR - see
+# BLOG_NOTES.md. Fix: always trigger, use dorny/paths-filter inside the job to
+# decide whether to actually plan - a job/step skipped via `if:` still
+# reports a "skipped" conclusion, which GitHub's required-checks logic
+# treats as passing (this is the documented, intended way to make a
+# conditionally-expensive job satisfy a required check).
 on:
   pull_request:
     branches: [main]
-    paths:
-      - 'modules/gcp/**'
-      - 'modules/azure/**'
-      - '.github/workflows/terraform-ci.yml'
 
 permissions:
   contents: read
@@ -39,25 +49,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check whether this module actually changed
+        id: changed
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            relevant:
+              - 'modules/${{ matrix.module }}/**'
+              - '.github/workflows/terraform-ci.yml'
+
       # google-github-actions/auth writes an Application Default Credentials
       # file and points GOOGLE_APPLICATION_CREDENTIALS at it - the google
       # provider in provider.tf (no explicit `credentials` argument) picks
       # this up automatically, no extra wiring needed.
       - name: Authenticate to GCP
-        if: matrix.module == 'gcp'
+        if: matrix.module == 'gcp' && steps.changed.outputs.relevant == 'true'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: 'projects/416578348143/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
           service_account: 'github-actions-infra-plan@szczypka-web-backend.iam.gserviceaccount.com'
 
       - uses: hashicorp/setup-terraform@v3
+        if: steps.changed.outputs.relevant == 'true'
         with:
           terraform_wrapper: true
 
       - name: Terraform init
+        if: steps.changed.outputs.relevant == 'true'
         run: terraform init
 
       - name: Terraform validate
+        if: steps.changed.outputs.relevant == 'true'
         run: terraform validate
 
       # -lock=false on purpose: the read-only CI identities (roles/viewer on
@@ -68,10 +90,12 @@ jobs:
       # that should ever be able to touch real infrastructure or state.
       - name: Terraform plan
         id: plan
+        if: steps.changed.outputs.relevant == 'true'
         run: terraform plan -no-color -lock=false
         continue-on-error: true
 
       - name: Comment plan on PR
+        if: steps.changed.outputs.relevant == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -92,5 +116,5 @@ jobs:
             });
 
       - name: Fail job if plan failed
-        if: steps.plan.outcome == 'failure'
+        if: steps.changed.outputs.relevant == 'true' && steps.plan.outcome == 'failure'
         run: exit 1
