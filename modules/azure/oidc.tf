@@ -114,3 +114,18 @@ resource "azurerm_role_assignment" "infra_plan_swa_reader_react_app" {
   role_definition_id = azurerm_role_definition.static_web_app_plan_reader.role_definition_resource_id
   principal_id       = azuread_service_principal.infra_plan.object_id
 }
+
+# azurerm_consumption_budget_subscription (budget.tf) is scoped at the
+# subscription root, not any resource group - none of the RG/resource-scoped
+# assignments above cover it, so terraform-ci's plan job got a 401 trying to
+# read it (Microsoft.Consumption/budgets isn't included in the narrower
+# scopes above). `Cost Management Reader` is the built-in role for exactly
+# this - read access to cost/budget data, nothing else - deliberately not
+# plain `Reader` at subscription scope, which would hand this read-only CI
+# identity visibility into every resource in the subscription instead of
+# just the one new resource type it actually needs.
+resource "azurerm_role_assignment" "infra_plan_cost_management_reader" {
+  scope                = "/subscriptions/${local.subscription_id}"
+  role_definition_name = "Cost Management Reader"
+  principal_id         = azuread_service_principal.infra_plan.object_id
+}
