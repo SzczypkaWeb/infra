@@ -4,6 +4,14 @@ terraform {
       source  = "hashicorp/azurerm"
       version = "~> 4.0"
     }
+    # Needed for oidc.tf - the App Registration / federated credential /
+    # service principal for terraform-ci.yml's own Azure identity live in
+    # Entra ID (Microsoft Graph), which azurerm doesn't manage - that's what
+    # the azuread provider is for.
+    azuread = {
+      source  = "hashicorp/azuread"
+      version = "~> 3.0"
+    }
   }
 
   # Mirrors the AWS module's S3 backend / GCP module's GCS backend (see
@@ -36,3 +44,8 @@ terraform {
 provider "azurerm" {
   features {}
 }
+
+# No explicit tenant_id - relies on the caller's own `az login` context,
+# same as provider "azurerm" above (which also doesn't hardcode a
+# subscription_id). There's only one tenant involved here either way.
+provider "azuread" {}
