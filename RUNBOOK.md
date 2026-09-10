@@ -452,3 +452,49 @@ migration, not the first step.
   placeholder); worth revisiting once the marketplace search endpoint
   (still pending - see the Marketplace module backlog) actually gets wired
   into next-app.
+- **Cost guardrail budgets for the new orchestrator-platform work (see
+  BLOG_NOTES.md for the full agentic-platform plan) — Azure done, GCP
+  blocked by the platform itself.** `modules/azure/budget.tf`:
+  `azurerm_consumption_budget_subscription`, $5/month (lowered from an
+  initial $25 - see below for why), 50/80/100% alerts to the same email
+  action group from `monitoring.tf` - applied for real. `modules/gcp/
+  budget.tf`'s `google_billing_budget` is written but deliberately
+  commented out: GCP Free Trial billing accounts don't support budget
+  creation at all (Google owns the billing account for the trial's
+  duration) - confirmed after first fixing two real, separate problems
+  that turned out not to be the actual blocker (a quota-project 403, then a
+  400 with no useful detail). `provider "google"` in `modules/gcp/
+  provider.tf` now sets `billing_project`/`user_project_override = true` -
+  a real, worth-keeping fix independent of the budget issue:
+  `gcloud auth application-default set-quota-project` does NOT affect what
+  quota project the Terraform google provider itself uses for API calls;
+  the provider has its own separate resolution path, and was silently
+  defaulting to an old, unrelated "My First Project" (project number
+  764086051850) instead of `szczypka-web-backend`. Practical risk of not
+  having the GCP alert: lower than it sounds - the Free Trial has no
+  payment method attached, so a runaway-spend scenario ends in services
+  being suspended once trial credit is exhausted, not a surprise charge.
+  Revisit if this billing account ever becomes a real paid one.
+- **Azure's free trial actually expired mid-project, and it broke more than
+  expected.** The 30-day/$200 trial ending doesn't just stop new spend - Azure
+  disables the WHOLE subscription (all resources become inaccessible, not
+  just billable ones), which is why the Static Web Apps started returning
+  Azure's own "404: Not Found" page (the SWA edge was still up, but the
+  disabled subscription meant it couldn't serve the backing content) and
+  `terraform apply` failed with `ReadOnlyDisabledSubscription` (409) on every
+  resource read, not just writes. Fix: Azure Portal → Subscriptions → find
+  the disabled one → upgrade to Pay-As-You-Go (a plain "Reactivate" button
+  only applies to manually-cancelled PAYG subscriptions, not an expired
+  trial). Once upgraded, Static Web Apps' Free tier is genuinely
+  bill-independent ("always free", not part of the 12-month clock) - but
+  that only matters once the parent subscription itself is un-disabled.
+  Real, deliberate follow-up once billing was live for real: the
+  `azurerm_application_insights_standard_web_test` resources in
+  `monitoring.tf` turned out to be billed per execution (~$0.0005 each,
+  unlike the older free "URL ping test" kind Microsoft is retiring) - 2
+  geo-locations x every 5 minutes x 2 apps works out to roughly $17/month,
+  not worth it for a static frontend Azure's own CDN already serves
+  reliably. Both tests set to `enabled = false` (kept, not deleted, so
+  turning them back on later needs no config to re-derive) rather than
+  removed outright. Budget threshold also dropped from $25 to $5/month given
+  the app's actual expected spend at this scale.
