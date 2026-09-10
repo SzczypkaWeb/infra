@@ -5,7 +5,7 @@ resource "azurerm_consumption_budget_subscription" "orchestrator_guardrail" {
   name            = "orchestrator-platform-guardrail"
   subscription_id = "/subscriptions/${local.subscription_id}"
 
-  amount     = 25
+  amount     = 5
   time_grain = "Monthly"
 
   time_period {

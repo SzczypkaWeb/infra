@@ -25,8 +25,16 @@ resource "azurerm_application_insights_standard_web_test" "react_app" {
   geo_locations           = ["us-tx-sn1-azr", "us-il-ch1-azr"]
   frequency               = 300
   timeout                 = 30
-  enabled                 = true
-  retry_enabled           = true
+  # Standard web tests are billed per execution (~$0.0005 each, per
+  # Microsoft's public pricing) - unlike the older "URL ping test" kind,
+  # which was bundled free. 2 geo_locations x every 5 min x 2 apps works out
+  # to roughly $17/month once real billing is active (see BLOG_NOTES.md /
+  # RUNBOOK.md) - not worth it for a static frontend Azure's own CDN already
+  # serves reliably, versus the backend uptime check on GCP which is the
+  # piece more likely to actually fail. Disabled rather than deleted - flip
+  # back to `true` any time with no config to re-derive.
+  enabled       = false
+  retry_enabled = true
 
   request {
     url = "https://${azurerm_static_web_app.react_app.default_host_name}"
@@ -41,8 +49,9 @@ resource "azurerm_application_insights_standard_web_test" "frontend_shell" {
   geo_locations           = ["us-tx-sn1-azr", "us-il-ch1-azr"]
   frequency               = 300
   timeout                 = 30
-  enabled                 = true
-  retry_enabled           = true
+  # See react_app web test above - same billed-per-execution reasoning.
+  enabled       = false
+  retry_enabled = true
 
   request {
     url = "https://${azurerm_static_web_app.frontend_shell.default_host_name}"
