@@ -51,7 +51,7 @@ jobs:
 
       - name: Check whether this module actually changed
         id: changed
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             relevant:
