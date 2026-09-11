@@ -2,7 +2,7 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 4.0"
+      version = "~> 5.4"
     }
     # Needed for oidc.tf - the App Registration / federated credential /
     # service principal for terraform-ci.yml's own Azure identity live in
