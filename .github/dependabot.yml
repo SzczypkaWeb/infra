@@ -1,0 +1,30 @@
+version: 2
+
+updates:
+  # Terraform's `directory` doesn't recurse into subdirectories - one entry
+  # per module that declares its own required_providers block. modules/aws
+  # deliberately excluded - AWS was decommissioned (see task #9), the module
+  # is legacy/unused.
+  - package-ecosystem: "terraform"
+    directory: "/modules/gcp"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+
+  - package-ecosystem: "terraform"
+    directory: "/modules/azure"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore"
