@@ -114,6 +114,16 @@ nothing physically prevents a direct push to `main`.
 pipeline (#45 done for this trio). `next-app` doesn't need its own workflow —
 Vercel gives a stable per-branch URL for free, no repo config (see section 1).
 
+**The orchestrator (`../orchestrator`) now knows this too**, as of
+`repos.py`'s `target_branch` field: `"staging"` for backend/react-app/
+frontend-shell, `"main"` for shared-ui/next-app/e2e-tests. It opens its PRs
+(`gh pr create --base {target_branch}`) and diffs for review
+(`git diff {target_branch}...{branch}`) against that, never a hardcoded
+`main` - before this, every orchestrator-opened PR on these three repos
+targeted `main` directly, skipping staging entirely. If a repo's branch
+strategy above changes, `repos.py` needs updating to match, or the
+orchestrator will silently go back to targeting the wrong branch.
+
 ## 5. shared-ui: release flow
 
 The repeatable cycle every time a component in the library changes:
