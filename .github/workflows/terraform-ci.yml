@@ -69,7 +69,7 @@ jobs:
           workload_identity_provider: 'projects/416578348143/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
           service_account: 'github-actions-infra-plan@szczypka-web-backend.iam.gserviceaccount.com'
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         if: steps.changed.outputs.relevant == 'true'
         with:
           terraform_wrapper: true
